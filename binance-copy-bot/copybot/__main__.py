@@ -51,14 +51,14 @@ def main():
 
     if cmd == "check":      # 第一步：验证数据源
         d = lead.detail()
-        print("带单员:", d.get("nickname"), "| 带单余额:", d.get("marginBalance"),
-              "| 公开持仓:", d.get("positionShow"))
-        print("== 最近 10 笔成交（跟单依据）==")
+        print("LEAD balance:", d.get("marginBalance"), "| positions public:", d.get("positionShow"),
+              "|", d.get("nickname"))
+        print("== last 10 lead orders ==")
         for o in lead.orders(1, 10):
             t = time.strftime("%m-%d %H:%M:%S", time.gmtime(o["orderUpdateTime"] / 1000))
             print(f"{t} UTC  {o['symbol']:<12} {o.get('positionSide'):<5} {o['side']:<4} "
                   f"{o['executedQty']} @ {o['avgPrice']}  pnl={o.get('totalPnl')}")
-        print("== 合约行情接口 ==", "正常" if mark_price("BTCUSDT") else "访问失败（检查网络/地区）")
+        print("== Binance futures API:", "OK ==" if mark_price("BTCUSDT") else "FAILED (network/region) ==")
         return
     if cmd == "reset":      # 解除累计亏损熔断，重新计算起始权益
         if os.path.exists(cfg["state_file"]):
@@ -77,7 +77,7 @@ def main():
             sys.exit("实盘需要在 .env 里填 BINANCE_API_KEY / BINANCE_API_SECRET")
         broker = BinanceBroker(key, sec)
     eng = Engine(cfg, lead, broker, telegram())
-    log.info("开始运行，dry_run=%s", cfg["dry_run"])
+    log.info("RUN dry_run=%s | 开始运行", cfg["dry_run"])
     fails = 0
     while True:
         try:

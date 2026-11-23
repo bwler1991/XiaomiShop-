@@ -6,18 +6,18 @@ BASE="${COPYBOT_BASE:-https://raw.githubusercontent.com/bwler1991/XiaomiShop-/cc
 DIR="${COPYBOT_DIR:-/opt/copybot}"
 FILES="requirements.txt config.example.yaml .env.example README.md
 copybot/__init__.py copybot/__main__.py copybot/lead.py copybot/engine.py copybot/broker.py"
-trap 'echo; echo "!!! 安装没有完成，请把这个屏幕截图发给助手 !!!"' ERR
+trap 'echo; echo "!!! INSTALL FAILED - send a screenshot of this screen !!!"' ERR
 export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a
 
-echo "[1/5] 安装系统依赖（约 1 分钟）..."
+echo "[1/5] installing system packages (about 1 min)..."
 apt-get update -qq
 apt-get install -y -qq python3-venv python3-pip curl >/dev/null
 
-echo "[2/5] 下载程序..."
+echo "[2/5] downloading program..."
 mkdir -p "$DIR/copybot"
 for f in $FILES; do curl -fsSL "$BASE/$f" -o "$DIR/$f"; done
 
-echo "[3/5] 安装 Python 依赖..."
+echo "[3/5] installing Python packages..."
 cd "$DIR"
 [ -d .venv ] || python3 -m venv .venv
 .venv/bin/pip install -q -r requirements.txt
@@ -25,13 +25,13 @@ cd "$DIR"
 [ -f .env ] || cp .env.example .env
 chmod 600 .env
 
-echo "[4/5] 检查数据源..."
+echo "[4/5] checking data source..."
 .venv/bin/python -m copybot check
 
-echo "[5/5] 设置后台运行..."
+echo "[5/5] setting up background service..."
 cat > /usr/local/bin/copybot-log <<'EOT'
 #!/bin/sh
-echo "运行状态: $(systemctl is-active copybot 2>/dev/null || echo 未知)"
+echo "status: $(systemctl is-active copybot 2>/dev/null || echo unknown)"
 tail -n "${1:-30}" /opt/copybot/copybot.log
 EOT
 chmod +x /usr/local/bin/copybot-log
@@ -60,11 +60,11 @@ EOT
   sleep 5
   echo
   echo "=============================================="
-  echo " 安装完成。运行状态: $(systemctl is-active copybot)"
-  echo " 当前为模拟模式，不会下单。"
-  echo " 以后查看运行情况，输入:  copybot-log"
+  echo " INSTALL OK. status: $(systemctl is-active copybot)"
+  echo " mode: DRY RUN (no real orders)"
+  echo " to see what it is doing, type:  copybot-log"
   echo "=============================================="
   tail -n 5 "$DIR/copybot.log" || true
 else
-  echo "未检测到 systemd，已跳过后台运行设置。"
+  echo "no systemd found, background service skipped."
 fi

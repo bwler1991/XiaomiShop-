@@ -142,7 +142,7 @@ class Engine:
             return
         side = "SELL" if cur > 0 else "BUY"
         self.broker.order(sym, side, q, pside, True)
-        self.say(f"{'[模拟] ' if self.cfg['dry_run'] else ''}减/平仓 {sym} {pside} {side} {q}")
+        self.say(f"{'[DRY] ' if self.cfg['dry_run'] else ''}REDUCE {sym} {pside} {side} {q} | 减/平仓")
 
     def _open(self, key, tgt, qty, t, mine, tgts):
         sym, pside = key
@@ -173,8 +173,7 @@ class Engine:
             log.warning("%s 设置杠杆 %sx 失败（沿用现有杠杆）: %s", sym, t["lev"], e)
         self.broker.order(sym, side, q, pside, False)
         self._skipped.pop(key, None)
-        self.say(f"{'[模拟] ' if c['dry_run'] else ''}开/加仓 {sym} {pside} {side} {q} "
-                 f"@~{mark} 杠杆{t['lev']}x")
+        self.say(f"{'[DRY] ' if c['dry_run'] else ''}OPEN {sym} {pside} {side} {q} @~{mark} lev={t['lev']}x | 开/加仓")
 
     def _skip(self, key, msg):
         if self._skipped.get(key) != msg.split(" ")[1][:6]:   # 同类原因只提示一次
@@ -197,8 +196,7 @@ class Engine:
 
         if "baseline" not in st:
             st["baseline"] = [] if self.cfg["copy_existing_positions"] else sorted(raw)
-            self.say(f"启动。跟单比例 {self.ratio():.5%}。只跟启动之后他新开的仓位。"
-                     f"{' [模拟模式]' if self.cfg['dry_run'] else ''}")
+            self.say(f"START ratio={self.ratio():.5%} dry_run={self.cfg['dry_run']} | 启动，只跟启动之后他新开的仓位")
         else:
             st["baseline"] = [k for k in st["baseline"] if tuple(k) in raw]
 

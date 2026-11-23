@@ -121,8 +121,8 @@ class LeadSource:
             p["ref"] = price
         p["amt"] = round(new, 10)
         lag = time.time() - int(o["orderUpdateTime"]) / 1000
-        log.info("带单员成交: %s %s %s %.6g @ %s → 跟踪仓位 %.6g（发现延迟 %.0f 秒）",
-                 sym, ps, o["side"], qty, price, p["amt"], lag)
+        log.info("LEAD %s %s %s qty=%.6g px=%s tracked=%.6g lag=%.0fs | 带单员成交（发现延迟 %.0f 秒）",
+                 sym, ps, o["side"], qty, price, p["amt"], lag, lag)
         if p["amt"] == 0:
             del self.st["pos"][key]
 

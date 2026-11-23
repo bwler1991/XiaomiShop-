@@ -1,0 +1,7 @@
+.env
+config.yaml
+state.json
+*.log
+__pycache__/
+.venv/
+lead_state.json

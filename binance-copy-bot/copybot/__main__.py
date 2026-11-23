@@ -1,0 +1,95 @@
+import json, logging, os, sys, time
+import requests, yaml
+from .lead import LeadSource
+from .broker import BinanceBroker, SimBroker
+from .engine import Engine, DEFAULTS
+
+
+def load_env(path=".env"):
+    if os.path.exists(path):
+        for line in open(path):
+            if "=" in line and not line.strip().startswith("#"):
+                k, v = line.strip().split("=", 1)
+                os.environ.setdefault(k, v)
+
+
+def telegram():
+    tok, chat = os.getenv("TELEGRAM_BOT_TOKEN"), os.getenv("TELEGRAM_CHAT_ID")
+    if not (tok and chat):
+        return lambda m: None
+    return lambda m: requests.post(f"https://api.telegram.org/bot{tok}/sendMessage",
+                                   json={"chat_id": chat, "text": m}, timeout=10)
+
+
+_px = {}
+
+
+def mark_price(symbol):
+    """官方公开行情：标记价格。失败返回 None（退回用他的成交价）。"""
+    hit = _px.get(symbol)
+    if hit and time.time() - hit[1] < 2:
+        return hit[0]
+    try:
+        r = requests.get("https://fapi.binance.com/fapi/v1/premiumIndex",
+                         params={"symbol": symbol}, timeout=5).json()
+        _px[symbol] = (float(r["markPrice"]), time.time())
+        return _px[symbol][0]
+    except Exception:
+        return None
+
+
+def main():
+    cmd = sys.argv[1] if len(sys.argv) > 1 else "run"
+    load_env()
+    cfg = {**DEFAULTS, **(yaml.safe_load(open("config.yaml")) or {})}
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s",
+                        handlers=[logging.StreamHandler(), logging.FileHandler("copybot.log")])
+    log = logging.getLogger("copybot")
+    if not cfg.get("portfolio_id"):
+        sys.exit("请先在 config.yaml 里填 portfolio_id")
+    lead = LeadSource(cfg["portfolio_id"], cfg["lead_host"], cfg["lead_state_file"], mark_price)
+
+    if cmd == "check":      # 第一步：验证数据源
+        d = lead.detail()
+        print("带单员:", d.get("nickname"), "| 带单余额:", d.get("marginBalance"),
+              "| 公开持仓:", d.get("positionShow"))
+        print("== 最近 10 笔成交（跟单依据）==")
+        for o in lead.orders(1, 10):
+            t = time.strftime("%m-%d %H:%M:%S", time.gmtime(o["orderUpdateTime"] / 1000))
+            print(f"{t} UTC  {o['symbol']:<12} {o.get('positionSide'):<5} {o['side']:<4} "
+                  f"{o['executedQty']} @ {o['avgPrice']}  pnl={o.get('totalPnl')}")
+        print("== 合约行情接口 ==", "正常" if mark_price("BTCUSDT") else "访问失败（检查网络/地区）")
+        return
+    if cmd == "reset":      # 解除累计亏损熔断，重新计算起始权益
+        if os.path.exists(cfg["state_file"]):
+            st = json.load(open(cfg["state_file"]))
+            for k in ("halted", "start_equity", "day_halt"):
+                st.pop(k, None)
+            json.dump(st, open(cfg["state_file"], "w"), indent=1)
+        print("已重置熔断状态")
+        return
+
+    if cfg["dry_run"]:
+        broker = SimBroker()
+    else:
+        key, sec = os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_API_SECRET")
+        if not (key and sec):
+            sys.exit("实盘需要在 .env 里填 BINANCE_API_KEY / BINANCE_API_SECRET")
+        broker = BinanceBroker(key, sec)
+    eng = Engine(cfg, lead, broker, telegram())
+    log.info("开始运行，dry_run=%s", cfg["dry_run"])
+    fails = 0
+    while True:
+        try:
+            eng.step()
+            fails = 0
+        except Exception as e:
+            fails += 1
+            log.warning("本轮失败(%d): %s", fails, e)
+            if fails == 20:
+                eng.say("⚠️ 连续 20 轮读取失败，跟单可能已中断，请检查")
+        time.sleep(cfg["poll_interval_sec"] * min(1 + fails, 10))
+
+
+if __name__ == "__main__":
+    main()

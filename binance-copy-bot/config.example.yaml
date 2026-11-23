@@ -1,0 +1,25 @@
+# ===== 跟谁 =====
+portfolio_id: "5075281354358777856"   # 熬鹰资本（带单主页链接里的数字）
+lead_host: www.binance.com  # 打不开 .com 可改成 www.binance.info
+
+# ===== 资金（你最需要改的部分）=====
+capital_usdt: 1000          # 你投入跟单的本金（USDT）
+lead_balance_usdt: 328944   # 带单员的带单余额；能自动获取时以自动获取为准，否则用这个值
+# 下单比例 = capital_usdt / 带单员余额。例：1000 / 328944 ≈ 0.3%，他开 100 ETH，你开 0.3 ETH
+
+# ===== 亏损上限 =====
+max_loss_usdt: 300          # 累计亏损达到此值：全部平仓并永久停止（需手动 reset）
+daily_max_loss_usdt: 150    # 当日（UTC）亏损达到此值：全部平仓，当天不再开新仓
+
+# ===== 仓位限制 =====
+max_leverage: 10            # 你每个币种使用的杠杆（全仓模式下只影响保证金占用，不影响仓位大小）
+max_notional_per_symbol: 5000   # 单个币种最大名义仓位（USDT）
+max_total_notional: null    # 总名义仓位上限；null = capital_usdt × max_leverage
+max_entry_slippage_pct: 1.0 # 现价比他的开仓均价差超过这个百分比就不追
+symbol_whitelist: []        # 只跟这些币种，空 = 全部
+symbol_blacklist: []
+
+# ===== 行为 =====
+dry_run: true               # true = 只打印不下单。确认无误后再改 false
+poll_interval_sec: 3
+state_file: state.json

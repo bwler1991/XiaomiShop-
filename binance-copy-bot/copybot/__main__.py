@@ -45,13 +45,20 @@ def report(logfile="copybot.log", n=25):
         return print("no log yet")
     lines = open(logfile, errors="replace").read().splitlines()
     ev = [l.split(" | ")[0] for l in lines
-          if re.search(r"\d (\[DRY\] )?(LEAD|OPEN|REDUCE|START|RUN) ", l)]
-    lags = sorted(int(m.group(1)) for l in ev for m in [re.search(r"lag=(\d+)s", l)] if m)
+          if re.search(r"\d (\[DRY\] )?(LEAD|OPEN|REDUCE|START|RUN|LEADTRIP|SIMTRIP|PROBE) ", l)]
+    lags = sorted(int(m.group(1)) for l in ev if " LEAD " in l
+                  for m in [re.search(r"lag=(\d+)s", l)] if m)
+    pl = sorted(int(m.group(1)) for l in ev if " PROBE " in l
+                for m in [re.search(r"lag=(\d+)s", l)] if m)
     fails = sum(1 for l in lines if "POLL FAILED" in l or "\u672c\u8f6e\u5931\u8d25" in l)
     print(f"lead fills seen: {len(lags)}")
     if lags:
         print(f"lag seconds: min {lags[0]} / median {lags[len(lags) // 2]} / max {lags[-1]}")
         print("lag list:", " ".join(map(str, lags[-40:])))
+    if pl:
+        print(f"trade-history probe lag: min {pl[0]} / median {pl[len(pl) // 2]} / max {pl[-1]} ({len(pl)} fills)")
+    for l in [l for l in ev if "TRIP " in l][-12:]:
+        print(l[5:19] + l[23:])
     print(f"simulated or real orders: {sum(1 for l in ev if ' OPEN ' in l or ' REDUCE ' in l)}"
           f" | failed-poll log lines: {fails}")
     print(f"--- last {n} events ---")
@@ -70,7 +77,8 @@ def main():
     log = logging.getLogger("copybot")
     if not cfg.get("portfolio_id"):
         sys.exit("请先在 config.yaml 里填 portfolio_id")
-    lead = LeadSource(cfg["portfolio_id"], cfg["lead_host"], cfg["lead_state_file"], mark_price)
+    lead = LeadSource(cfg["portfolio_id"], cfg["lead_host"], cfg["lead_state_file"], mark_price,
+                      probe=bool(cfg["dry_run"] and cfg.get("probe_trade_history", True)))
 
     if cmd == "check":      # 第一步：验证数据源
         try:

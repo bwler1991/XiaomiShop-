@@ -139,6 +139,13 @@ class Engine:
             self.say(f"⏸ 当日亏损 {daily:.2f} USDT ≥ 上限 {c['daily_max_loss_usdt']}，已全部平仓，今日不再开仓。")
         return False
 
+    def _price(self, sym):
+        fn = getattr(self.lead, "price_fn", None)
+        try:
+            return fn(sym) if fn else None
+        except Exception:
+            return None
+
     # ---------- orders ----------
     def _reduce(self, key, cur, qty, full=False):
         sym, pside = key
@@ -149,8 +156,9 @@ class Engine:
         if q <= 0:
             return
         side = "SELL" if cur > 0 else "BUY"
-        self.broker.order(sym, side, q, pside, True)
-        self.say(f"{'[DRY] ' if self.cfg['dry_run'] else ''}REDUCE {sym} {pside} {side} {q} | 减/平仓")
+        px = self._price(sym)
+        self.broker.order(sym, side, q, pside, True, price=px)
+        self.say(f"{'[DRY] ' if self.cfg['dry_run'] else ''}REDUCE {sym} {pside} {side} {q} @~{px} | 减/平仓")
 
     def _open(self, key, tgt, qty, t, mine, tgts):
         sym, pside = key
@@ -179,7 +187,7 @@ class Engine:
             self.broker.set_leverage(sym, t["lev"])
         except Exception as e:      # 部分品种杠杆上限更低；沿用账户现有杠杆继续下单
             log.warning("%s 设置杠杆 %sx 失败（沿用现有杠杆）: %s", sym, t["lev"], e)
-        self.broker.order(sym, side, q, pside, False)
+        self.broker.order(sym, side, q, pside, False, price=mark)
         self._skipped.pop(key, None)
         self.say(f"{'[DRY] ' if c['dry_run'] else ''}OPEN {sym} {pside} {side} {q} @~{mark} lev={t['lev']}x | 开/加仓")
 

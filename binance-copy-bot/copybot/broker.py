@@ -1,9 +1,10 @@
 """币安 U 本位合约官方 API（下单端）+ 模拟盘。"""
-import hashlib, hmac, time, urllib.parse
+import hashlib, hmac, logging, time, urllib.parse
 from decimal import Decimal, ROUND_DOWN
 import requests
 
 FAPI = "https://fapi.binance.com"
+log = logging.getLogger("copybot")
 
 
 class Filters:
@@ -78,10 +79,10 @@ class BinanceBroker:
 
 
 class SimBroker:
-    """dry_run 用：不碰账户，只在内存里记仓位。"""
+    """dry_run 用：不碰账户，只在内存里记仓位，并按发现时的标记价格估算每笔交易的收益。"""
     def __init__(self, filters=None, hedge=False):
         self.filters = filters or Filters()
-        self.pos, self.orders, self._hedge = {}, [], hedge
+        self.pos, self.orders, self._hedge, self.book = {}, [], hedge, {}
 
     def hedge_mode(self): return self._hedge
     def positions(self): return {k: v for k, v in self.pos.items() if v}
@@ -90,5 +91,21 @@ class SimBroker:
 
     def order(self, symbol, side, qty, pside, reduce_only, price=None):
         k = (symbol, pside)
-        self.pos[k] = round(self.pos.get(k, 0.0) + (float(qty) if side == "BUY" else -float(qty)), 12)
+        old = self.pos.get(k, 0.0)
+        new = round(old + (float(qty) if side == "BUY" else -float(qty)), 12)
+        self.pos[k] = new
         self.orders.append((symbol, side, float(qty), pside, reduce_only))
+        if not price:
+            return
+        b = self.book.setdefault(k, dict(entry=0.0, x_qty=0.0, x_not=0.0))
+        if abs(new) > abs(old):
+            b["entry"] = (abs(old) * b["entry"] + (abs(new) - abs(old)) * price) / abs(new)
+        else:
+            b["x_qty"] += abs(old) - abs(new)
+            b["x_not"] += (abs(old) - abs(new)) * price
+        if new == 0:
+            if b["x_qty"] and b["entry"] > 0:
+                ex = b["x_not"] / b["x_qty"]
+                ret = (ex / b["entry"] - 1) * (1 if old > 0 else -1) * 100
+                log.info("SIMTRIP %s %s entry=%.6g exit=%.6g ret=%+.2f%%", symbol, pside, b["entry"], ex, ret)
+            del self.book[k]

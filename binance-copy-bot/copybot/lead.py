@@ -31,10 +31,11 @@ class LeadSource:
     reliable_closes = True    # 平仓来自明确的成交记录，不需要二次确认
 
     def __init__(self, portfolio_id, host="www.binance.com", state_file="lead_state.json",
-                 price_fn=None, persist=True, session=None):
+                 price_fn=None, persist=True, session=None, probe=False):
         self.pid, self.base = str(portfolio_id), f"https://{host}{PATH}"
         self.state_file, self.persist, self.price_fn = state_file, persist, price_fn
         self.s = session or requests.Session()
+        self.probe, self._probe_seen = probe, None
         self.st = {"seen": {}, "pos": {}}
         if persist and os.path.exists(state_file):
             self.st = json.load(open(state_file))
@@ -128,14 +129,40 @@ class LeadSource:
         if abs(new) > abs(amt) and price > 0:            # 加仓：更新均价
             p["entry"] = (abs(amt) * p["entry"] + (abs(new) - abs(amt)) * price) / abs(new)
             p["ref"] = price
+        elif abs(new) < abs(amt) and price > 0:          # 减仓：累计平仓均价，用于整笔交易的收益对比
+            p["x_qty"] = p.get("x_qty", 0.0) + abs(amt) - abs(new)
+            p["x_not"] = p.get("x_not", 0.0) + (abs(amt) - abs(new)) * price
         p["amt"] = round(new, 10)
         lag = time.time() - int(o["orderUpdateTime"]) / 1000
         log.info("LEAD %s %s %s qty=%.6g px=%s tracked=%.6g lag=%.0fs | 带单员成交（发现延迟 %.0f 秒）",
                  sym, ps, o["side"], qty, price, p["amt"], lag, lag)
         if p["amt"] == 0:
+            if p.get("x_qty") and p["entry"] > 0:
+                ex = p["x_not"] / p["x_qty"]
+                ret = (ex / p["entry"] - 1) * (1 if amt > 0 else -1) * 100
+                log.info("LEADTRIP %s %s entry=%.6g exit=%.6g ret=%+.2f%%", sym, ps, p["entry"], ex, ret)
             del self.st["pos"][key]
 
+    def _probe(self):
+        """诊断：另一个接口 trade-history 是否比 order-history 公开得更快。只记日志，不参与跟单。"""
+        d = self._check(self.s.post(f"{self.base}/trade-history", headers=HEADERS, timeout=10,
+                                    json={"portfolioId": self.pid, "pageNumber": 1, "pageSize": 20}))
+        keys = {f"{t['time']}|{t['symbol']}|{t['side']}": t for t in (d or {}).get("list") or []}
+        if self._probe_seen is None:
+            self._probe_seen = set(keys)
+            return
+        for k, t in keys.items():
+            if k not in self._probe_seen:
+                log.info("PROBE trade-history %s %s lag=%.0fs", t["symbol"], t["side"],
+                         time.time() - int(t["time"]) / 1000)
+        self._probe_seen |= set(keys)
+
     def positions(self):
+        if self.probe:
+            try:
+                self._probe()
+            except Exception:
+                pass
         for o, qty in self._poll_new():
             self._apply(o, qty)
         if self.persist:

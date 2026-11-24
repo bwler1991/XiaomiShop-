@@ -29,10 +29,10 @@ echo "[4/5] checking data source..."
 .venv/bin/python -m copybot check
 
 echo "[5/5] setting up background service..."
-cat > /usr/local/bin/copybot-log <<'EOT'
+cat > /usr/local/bin/copybot-log <<EOT
 #!/bin/sh
-echo "status: $(systemctl is-active copybot 2>/dev/null || echo unknown)"
-tail -n "${1:-30}" /opt/copybot/copybot.log
+echo "status: \$(systemctl is-active copybot 2>/dev/null || echo unknown)"
+cd $DIR && .venv/bin/python -m copybot report
 EOT
 chmod +x /usr/local/bin/copybot-log
 if command -v systemctl >/dev/null && [ -d /run/systemd/system ]; then

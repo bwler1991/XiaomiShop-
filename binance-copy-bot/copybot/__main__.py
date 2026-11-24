@@ -38,8 +38,31 @@ def mark_price(symbol):
         return None
 
 
+def report(logfile="copybot.log", n=25):
+    """给人看的摘要（纯 ASCII，网页终端能正常显示）。"""
+    import re
+    if not os.path.exists(logfile):
+        return print("no log yet")
+    lines = open(logfile, errors="replace").read().splitlines()
+    ev = [l.split(" | ")[0] for l in lines
+          if re.search(r"\d (\[DRY\] )?(LEAD|OPEN|REDUCE|START|RUN) ", l)]
+    lags = sorted(int(m.group(1)) for l in ev for m in [re.search(r"lag=(\d+)s", l)] if m)
+    fails = sum(1 for l in lines if "POLL FAILED" in l or "\u672c\u8f6e\u5931\u8d25" in l)
+    print(f"lead fills seen: {len(lags)}")
+    if lags:
+        print(f"lag seconds: min {lags[0]} / median {lags[len(lags) // 2]} / max {lags[-1]}")
+        print("lag list:", " ".join(map(str, lags[-40:])))
+    print(f"simulated or real orders: {sum(1 for l in ev if ' OPEN ' in l or ' REDUCE ' in l)}"
+          f" | failed-poll log lines: {fails}")
+    print(f"--- last {n} events ---")
+    for l in ev[-n:]:
+        print(l[5:19] + l[23:])          # 去掉年份和毫秒，行更短
+
+
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else "run"
+    if cmd == "report":
+        return report()
     load_env()
     cfg = {**DEFAULTS, **(yaml.safe_load(open("config.yaml")) or {})}
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s",
@@ -51,8 +74,10 @@ def main():
 
     if cmd == "check":      # 第一步：验证数据源
         d = lead.detail()
-        print("LEAD balance:", d.get("marginBalance"), "| positions public:", d.get("positionShow"),
+        print("LEAD balance now:", d.get("marginBalance"), "| positions public:", d.get("positionShow"),
               "|", d.get("nickname"))
+        r = cfg["capital_usdt"] / cfg["lead_balance_usdt"]
+        print(f"copy ratio: {r:.4%} (capital {cfg['capital_usdt']} / reference {cfg['lead_balance_usdt']})")
         print("== last 10 lead orders ==")
         for o in lead.orders(1, 10):
             t = time.strftime("%m-%d %H:%M:%S", time.gmtime(o["orderUpdateTime"] / 1000))
@@ -85,10 +110,11 @@ def main():
             fails = 0
         except Exception as e:
             fails += 1
-            log.warning("本轮失败(%d): %s", fails, e)
+            if fails == 1 or fails % 20 == 0:        # 接口偶尔返回“系统繁忙”，不刷屏
+                log.warning("POLL FAILED x%d: %s", fails, e)
             if fails == 20:
                 eng.say("⚠️ 连续 20 轮读取失败，跟单可能已中断，请检查")
-        time.sleep(cfg["poll_interval_sec"] * min(1 + fails, 10))
+        time.sleep(cfg["poll_interval_sec"] * min(1 + fails, 3))
 
 
 if __name__ == "__main__":

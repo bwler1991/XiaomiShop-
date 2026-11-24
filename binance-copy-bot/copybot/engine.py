@@ -5,7 +5,7 @@ from decimal import Decimal
 log = logging.getLogger("copybot")
 
 DEFAULTS = dict(
-    capital_usdt=1000, lead_balance_usdt=None, max_loss_usdt=300, daily_max_loss_usdt=150,
+    capital_usdt=1000, lead_balance_usdt=500000, use_live_lead_balance=False, max_loss_usdt=300, daily_max_loss_usdt=150,
     max_leverage=10, max_notional_per_symbol=5000, max_total_notional=None,
     max_entry_slippage_pct=1.0, symbol_whitelist=[], symbol_blacklist=[],
     dry_run=True, copy_existing_positions=False, poll_interval_sec=3, state_file="state.json",
@@ -44,15 +44,23 @@ class Engine:
 
     # ---------- sizing ----------
     def ratio(self):
-        if time.time() - self._bal_ts > 600:
-            self._bal_ts = time.time()
-            b = self.lead.balance()
-            if b:
-                self.lead_balance = b
-        bal = self.lead_balance or self.cfg["lead_balance_usdt"]
+        """跟单比例 = 我的本金 / 带单员的参考本金。
+
+        默认用配置里的固定参考值 lead_balance_usdt。不默认用他的实时余额，因为他平仓后
+        会把钱几乎全部提走（实测余额从 56 万掉到 500），实时余额会让比例瞬间放大上千倍。
+        """
+        c = self.cfg
+        bal = c["lead_balance_usdt"]
+        if c["use_live_lead_balance"]:
+            if time.time() - self._bal_ts > 600:
+                self._bal_ts = time.time()
+                b = self.lead.balance()
+                if b:
+                    self.lead_balance = b
+            bal = self.lead_balance or bal
         if not bal:
-            raise RuntimeError("拿不到带单员余额，请在 config 里填 lead_balance_usdt")
-        return self.cfg["capital_usdt"] / bal
+            raise RuntimeError("请在 config 里填 lead_balance_usdt")
+        return c["capital_usdt"] / bal
 
     def targets(self, lead_positions):
         """带单员仓位 → 我的目标仓位。

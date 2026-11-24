@@ -24,7 +24,7 @@ def mk(broker=None, **cfg):
     lead = FakeLead()
     b = broker or SimBroker(FakeFilters())
     msgs = []
-    e = Engine({"capital_usdt": 1000, **cfg}, lead, b, msgs.append, persist=False)
+    e = Engine({"capital_usdt": 1000, "use_live_lead_balance": True, **cfg}, lead, b, msgs.append, persist=False)
     return e, lead, b, msgs
 
 
@@ -158,7 +158,7 @@ def test_end_to_end_with_order_feed():
     feed = []
     s = src(feed)
     b = SimBroker(FakeFilters(), hedge=True)
-    e = Engine({"capital_usdt": 1000}, s, b, persist=False)
+    e = Engine({"capital_usdt": 1000, "lead_balance_usdt": 100000}, s, b, persist=False)
     e.step()
     T = s.st["init_ts"]                                     # 空记录启动时取当前时间
     feed.append(O(T + 10, "ETHUSDT", "SELL", "SHORT", 100, 2000.0))
@@ -216,3 +216,15 @@ def test_small_adds_accumulate_and_slippage_uses_last_add_price():
     lead.pos = [lp]
     e.step()
     assert b.positions()[("BTCUSDT", "BOTH")] == 0.004
+
+
+def test_ratio_ignores_live_balance_by_default():
+    lead = FakeLead()
+    lead.balance = lambda: 500.0                   # 他把钱提走后只剩 500
+    b = SimBroker(FakeFilters())
+    e = Engine({"capital_usdt": 1000, "lead_balance_usdt": 500000}, lead, b, persist=False)
+    assert e.ratio() == 0.002
+    e.step()
+    lead.pos = [P("ETHUSDT", 500)]                 # 他开 100 万 U → 我开 1 ETH = 2000 U，而不是按 200% 开
+    e.step()
+    assert b.positions() == {("ETHUSDT", "BOTH"): 1.0}

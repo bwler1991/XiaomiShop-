@@ -4,8 +4,10 @@ lead_host: www.binance.com  # 打不开 .com 可改成 www.binance.info
 
 # ===== 资金（你最需要改的部分）=====
 capital_usdt: 1000          # 你投入跟单的本金（USDT）
-lead_balance_usdt: 328944   # 带单员的带单余额；能自动获取时以自动获取为准，否则用这个值
-# 下单比例 = capital_usdt / 带单员余额。例：1000 / 328944 ≈ 0.3%，他开 100 ETH，你开 0.3 ETH
+lead_balance_usdt: 500000   # 带单员的“参考本金”，固定值，用来算比例
+# 跟单比例 = capital_usdt / lead_balance_usdt。例：1000 / 500000 = 0.2%，他开 100 万 U 的仓，你开 2000 U
+# 想跟得更重就把 lead_balance_usdt 调小，想更轻就调大。
+use_live_lead_balance: false  # 不要改成 true：他平仓后会把余额提到只剩几百 U，实时余额会让比例失控
 
 # ===== 亏损上限 =====
 max_loss_usdt: 300          # 累计亏损达到此值：全部平仓并永久停止（需手动 reset）

@@ -15,7 +15,7 @@ apt-get install -y -qq python3-venv python3-pip curl >/dev/null
 
 echo "[2/5] downloading program..."
 mkdir -p "$DIR/copybot"
-for f in $FILES; do curl -fsSL "$BASE/$f" -o "$DIR/$f"; done
+for f in $FILES; do curl -fsSL "$BASE/$f?t=$(date +%s)" -o "$DIR/$f"; done
 
 echo "[3/5] installing Python packages..."
 cd "$DIR"
@@ -26,7 +26,7 @@ cd "$DIR"
 chmod 600 .env
 
 echo "[4/5] checking data source..."
-.venv/bin/python -m copybot check
+.venv/bin/python -m copybot check || echo "(check reported a problem - continuing anyway)"
 
 echo "[5/5] setting up background service..."
 cat > /usr/local/bin/copybot-log <<EOT

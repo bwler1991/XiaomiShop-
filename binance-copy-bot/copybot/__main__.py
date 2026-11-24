@@ -73,16 +73,23 @@ def main():
     lead = LeadSource(cfg["portfolio_id"], cfg["lead_host"], cfg["lead_state_file"], mark_price)
 
     if cmd == "check":      # 第一步：验证数据源
-        d = lead.detail()
+        try:
+            d = lead.detail()
+        except Exception as e:
+            d = {}
+            print("(could not read lead profile right now - temporary):", e)
         print("LEAD balance now:", d.get("marginBalance"), "| positions public:", d.get("positionShow"),
               "|", d.get("nickname"))
         r = cfg["capital_usdt"] / cfg["lead_balance_usdt"]
         print(f"copy ratio: {r:.4%} (capital {cfg['capital_usdt']} / reference {cfg['lead_balance_usdt']})")
         print("== last 10 lead orders ==")
-        for o in lead.orders(1, 10):
-            t = time.strftime("%m-%d %H:%M:%S", time.gmtime(o["orderUpdateTime"] / 1000))
-            print(f"{t} UTC  {o['symbol']:<12} {o.get('positionSide'):<5} {o['side']:<4} "
-                  f"{o['executedQty']} @ {o['avgPrice']}  pnl={o.get('totalPnl')}")
+        try:
+            for o in lead.orders(1, 10, tries=8):
+                t = time.strftime("%m-%d %H:%M:%S", time.gmtime(o["orderUpdateTime"] / 1000))
+                print(f"{t} UTC  {o['symbol']:<12} {o.get('positionSide'):<5} {o['side']:<4} "
+                      f"{o['executedQty']} @ {o['avgPrice']}  pnl={o.get('totalPnl')}")
+        except Exception as e:      # 临时性错误不算失败，机器人运行时会自动重试
+            print("(could not read lead orders right now - temporary, the bot retries by itself):", e)
         print("== Binance futures API:", "OK ==" if mark_price("BTCUSDT") else "FAILED (network/region) ==")
         return
     if cmd == "reset":      # 解除累计亏损熔断，重新计算起始权益

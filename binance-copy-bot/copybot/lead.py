@@ -51,9 +51,18 @@ class LeadSource:
         return self._check(self.s.get(f"{self.base}/detail", params={"portfolioId": self.pid},
                                       headers=HEADERS, timeout=10)) or {}
 
-    def orders(self, page=1, size=20):
-        d = self._check(self.s.post(f"{self.base}/order-history", headers=HEADERS, timeout=10,
-                                    json={"portfolioId": self.pid, "pageNumber": page, "pageSize": size}))
+    def orders(self, page=1, size=20, tries=3):
+        """成交记录。接口会间歇返回“系统繁忙”(11012005)，所以原地快速重试几次。"""
+        for i in range(tries):
+            try:
+                d = self._check(self.s.post(
+                    f"{self.base}/order-history", headers=HEADERS, timeout=10,
+                    json={"portfolioId": self.pid, "pageNumber": page, "pageSize": size}))
+                break
+            except RuntimeError as e:
+                if "11012005" not in str(e) or i == tries - 1:
+                    raise
+                time.sleep(1)
         lst = (d or {}).get("list")
         if not isinstance(lst, list):
             raise RuntimeError(f"unexpected order-history payload: {str(d)[:200]}")

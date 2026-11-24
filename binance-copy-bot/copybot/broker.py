@@ -34,12 +34,13 @@ def round_qty(qty, step):
 
 
 class BinanceBroker:
-    def __init__(self, key, secret):
+    def __init__(self, key, secret, max_order_notional=None):
         self.key, self.secret = key, secret.encode()
         self.s = requests.Session()
         self.s.headers["X-MBX-APIKEY"] = key
         self.filters = Filters(self.s)
         self._lev = {}
+        self.max_order_notional = max_order_notional    # 单笔开仓名义金额的硬上限（防程序算错）
 
     def _req(self, method, path, **params):
         params.update(timestamp=int(time.time() * 1000), recvWindow=5000)
@@ -50,19 +51,32 @@ class BinanceBroker:
             raise RuntimeError(f"binance {path} {r.status_code}: {r.text[:300]}")
         return r.json()
 
+    def _get(self, name):
+        """账户/持仓查询：优先 v3，接口不存在时退回 v2。"""
+        try:
+            return self._req("GET", f"/fapi/v3/{name}")
+        except RuntimeError as e:
+            if " 404" not in str(e):
+                raise
+            return self._req("GET", f"/fapi/v2/{name}")
+
     def hedge_mode(self):
-        return bool(self._req("GET", "/fapi/v1/positionSide/dual")["dualSidePosition"])
+        v = self._req("GET", "/fapi/v1/positionSide/dual")["dualSidePosition"]
+        return v is True or str(v).lower() == "true"
 
     def positions(self):
         out = {}
-        for p in self._req("GET", "/fapi/v2/positionRisk"):
+        for p in self._get("positionRisk"):
             amt = float(p["positionAmt"])
             if amt:
                 out[(p["symbol"], p.get("positionSide", "BOTH"))] = amt
         return out
 
     def equity(self):
-        return float(self._req("GET", "/fapi/v2/account")["totalMarginBalance"])
+        a = self._get("account")
+        if a.get("totalMarginBalance") not in (None, ""):
+            return float(a["totalMarginBalance"])
+        return float(a["totalWalletBalance"]) + float(a.get("totalUnrealizedProfit") or 0)
 
     def set_leverage(self, symbol, lev):
         if self._lev.get(symbol) != lev:
@@ -70,9 +84,13 @@ class BinanceBroker:
             self._lev[symbol] = lev
 
     def order(self, symbol, side, qty, pside, reduce_only, price=None):
+        if (not reduce_only and price and self.max_order_notional
+                and float(qty) * price > self.max_order_notional * 1.05):
+            raise RuntimeError(f"refused: order notional {float(qty) * price:.0f} > limit "
+                               f"{self.max_order_notional}")
         p = dict(symbol=symbol, side=side, type="MARKET", quantity=format(qty, "f"))
         if pside != "BOTH":
-            p["positionSide"] = pside
+            p["positionSide"] = pside          # 双向持仓：用 positionSide，不能带 reduceOnly
         elif reduce_only:
             p["reduceOnly"] = "true"
         return self._req("POST", "/fapi/v1/order", **p)

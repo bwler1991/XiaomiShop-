@@ -127,8 +127,8 @@ class Engine:
         if total >= c["max_loss_usdt"]:
             self._close_all(self.broker.positions())
             st["halted"] = True
-            self.say(f"⛔ 累计亏损 {total:.2f} USDT ≥ 上限 {c['max_loss_usdt']}，已全部平仓并停止。"
-                     f"恢复需运行: python -m copybot reset")
+            self.say(f"HALT total loss {total:.2f} >= {c['max_loss_usdt']} USDT, all closed, bot stopped "
+                     f"| 累计亏损达到上限，已全部平仓并停止。恢复需运行 copybot-live")
             return True
         if daily >= c["daily_max_loss_usdt"] and st.get("day_halt") != day:
             self._close_all(self.broker.positions())
@@ -136,7 +136,8 @@ class Engine:
             # 他当前的仓位不再追，等他平掉后才跟新仓
             st["baseline"] = sorted({tuple(k) for k in st["baseline"]} |
                                     {(p.symbol, p.side) for p in lead_positions})
-            self.say(f"⏸ 当日亏损 {daily:.2f} USDT ≥ 上限 {c['daily_max_loss_usdt']}，已全部平仓，今日不再开仓。")
+            self.say(f"PAUSE daily loss {daily:.2f} >= {c['daily_max_loss_usdt']} USDT, all closed, no new "
+                     f"positions today | 当日亏损达到上限，已全部平仓，今日不再开仓")
         return False
 
     def _price(self, sym):
@@ -233,7 +234,7 @@ class Engine:
                 if open_qty > 0:
                     self._open(key, tgt, open_qty, tgts[key], mine, tgts)
             except Exception as e:
-                msg = f"⚠️ {key[0]} 下单失败: {e}"
+                msg = f"ORDER FAILED {key[0]}: {e} | 下单失败"
                 if time.time() - self._err.get(key, 0) > 600:    # 同一品种 10 分钟内只通知一次
                     self._err[key] = time.time()
                     self.say(msg)

@@ -228,3 +228,94 @@ def test_ratio_ignores_live_balance_by_default():
     lead.pos = [P("ETHUSDT", 500)]                 # 他开 100 万 U → 我开 1 ETH = 2000 U，而不是按 200% 开
     e.step()
     assert b.positions() == {("ETHUSDT", "BOTH"): 1.0}
+
+
+# ---------- 实盘下单端：用假的 HTTP 会话检查请求参数 ----------
+from copybot.broker import BinanceBroker
+
+
+class FakeHTTP:
+    def __init__(self, hedge, v3=True):
+        self.hedge, self.v3, self.calls, self.pos, self.headers = hedge, v3, [], {}, {}
+
+    def request(self, method, url, timeout=None):
+        import urllib.parse
+        path, q = url.split("?", 1)
+        path = path.replace("https://fapi.binance.com", "")
+        p = dict(urllib.parse.parse_qsl(q))
+        assert "signature" in p and "timestamp" in p
+        self.calls.append((method, path, p))
+
+        class R:
+            status_code, text = 200, ""
+            def json(s): return body
+        if path.startswith("/fapi/v3/") and not self.v3:
+            R.status_code, R.text, body = 404, "not found", {}
+        elif path.endswith("/positionSide/dual"):
+            body = {"dualSidePosition": self.hedge}
+        elif path.endswith("/account"):
+            body = {"totalMarginBalance": "1234.5"}
+        elif path.endswith("/positionRisk"):
+            body = [{"symbol": s, "positionSide": ps, "positionAmt": str(a)} for (s, ps), a in self.pos.items()]
+        elif path.endswith("/order"):
+            k = (p["symbol"], p.get("positionSide", "BOTH"))
+            self.pos[k] = self.pos.get(k, 0) + float(p["quantity"]) * (1 if p["side"] == "BUY" else -1)
+            body = {"orderId": 1, "status": "NEW"}
+        else:
+            body = {}
+        return R()
+
+
+def live(hedge, v3=True):
+    b = BinanceBroker("k", "s", max_order_notional=5000)
+    b.s = FakeHTTP(hedge, v3)
+    b.filters = FakeFilters()
+    return b
+
+
+def test_live_broker_requests_one_way_and_hedge():
+    b = live(False)
+    assert b.hedge_mode() is False and b.equity() == 1234.5
+    b.order("ETHUSDT", "BUY", Decimal("0.5"), "BOTH", False, price=2000.0)
+    b.order("ETHUSDT", "SELL", Decimal("0.5"), "BOTH", True, price=2000.0)
+    o1, o2 = [c[2] for c in b.s.calls if c[1] == "/fapi/v1/order"]
+    assert o1["type"] == "MARKET" and o1["quantity"] == "0.5" and "reduceOnly" not in o1 and "positionSide" not in o1
+    assert o2["reduceOnly"] == "true"
+    h = live(True, v3=False)                       # 双向持仓 + v3 不存在时退回 v2
+    assert h.hedge_mode() is True and h.equity() == 1234.5
+    h.order("ETHUSDT", "SELL", Decimal("0.5"), "SHORT", False, price=2000.0)
+    h.order("ETHUSDT", "BUY", Decimal("0.5"), "SHORT", True, price=2000.0)
+    o1, o2 = [c[2] for c in h.s.calls if c[1] == "/fapi/v1/order"]
+    assert o1["positionSide"] == "SHORT" and o2["positionSide"] == "SHORT"
+    assert "reduceOnly" not in o1 and "reduceOnly" not in o2
+    assert h.positions() == {}
+    assert any(c[1] == "/fapi/v2/account" for c in h.s.calls)
+
+
+def test_live_broker_refuses_oversized_open():
+    b = live(False)
+    try:
+        b.order("ETHUSDT", "BUY", Decimal("10"), "BOTH", False, price=2000.0)   # 20000 > 5000
+        assert False
+    except RuntimeError as e:
+        assert "refused" in str(e)
+    assert not [c for c in b.s.calls if c[1] == "/fapi/v1/order"]
+
+
+def test_engine_live_cycle_in_hedge_mode():
+    feed = []
+    s = src(feed)
+    b = live(True)
+    e = Engine({"capital_usdt": 1000, "lead_balance_usdt": 100000, "dry_run": False}, s, b, persist=False)
+    e.step()
+    T = s.st["init_ts"]
+    feed.append(O(T + 10, "ETHUSDT", "SELL", "SHORT", 100, 2000.0))
+    e.step()
+    assert b.positions() == {("ETHUSDT", "SHORT"): -1.0}
+    feed.append(O(T + 20, "ETHUSDT", "BUY", "SHORT", 40, 1950.0, pnl=1))
+    e.step()
+    assert round(b.positions()[("ETHUSDT", "SHORT")], 6) == -0.6
+    feed.append(O(T + 30, "ETHUSDT", "BUY", "SHORT", 60, 1900.0, pnl=1))
+    e.step()
+    assert b.positions() == {}
+    assert e.state["start_equity"] == 1234.5

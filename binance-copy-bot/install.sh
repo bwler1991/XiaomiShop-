@@ -34,6 +34,24 @@ cat > /usr/local/bin/copybot-log <<EOT
 echo "status: \$(systemctl is-active copybot 2>/dev/null || echo unknown)"
 cd $DIR && .venv/bin/python -m copybot report
 EOT
+mk() {  # mk <command-name> <copybot subcommand> <restart service afterwards: yes|no>
+  cat > "/usr/local/bin/$1" <<EOT
+#!/bin/sh
+cd $DIR || exit 1
+.venv/bin/python -m copybot $2 "\$@" || exit 1
+chown -R copybot: $DIR 2>/dev/null
+[ "$3" = yes ] && systemctl restart copybot && sleep 3 && echo "service: \$(systemctl is-active copybot)"
+exit 0
+EOT
+  chmod +x "/usr/local/bin/$1"
+}
+mk copybot-setup setup yes      # capital / loss limits
+mk copybot-key   setkey no      # save API key + read-only account check
+mk copybot-check livecheck no   # read-only account check
+mk copybot-test  testorder no   # tiny real order, bought and sold again
+mk copybot-live  golive yes     # switch to REAL trading (asks for YES)
+mk copybot-pause pause yes      # back to dry run
+mk copybot-show  show no        # print current settings
 chmod +x /usr/local/bin/copybot-log
 if command -v systemctl >/dev/null && [ -d /run/systemd/system ]; then
   id copybot >/dev/null 2>&1 || useradd -r -s /usr/sbin/nologin copybot
@@ -61,8 +79,8 @@ EOT
   echo
   echo "=============================================="
   echo " INSTALL OK. status: $(systemctl is-active copybot)"
-  echo " mode: DRY RUN (no real orders)"
-  echo " to see what it is doing, type:  copybot-log"
+  echo " mode: $(grep -q '^dry_run: false' "$DIR/config.yaml" && echo 'LIVE (REAL ORDERS)' || echo 'DRY RUN (no real orders)')"
+  echo " commands: copybot-log  copybot-setup  copybot-key  copybot-test  copybot-live  copybot-pause"
   echo "=============================================="
   tail -n 5 "$DIR/copybot.log" || true
 else
